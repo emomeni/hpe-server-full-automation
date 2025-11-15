@@ -1,24 +1,30 @@
-# Default / bootstrap credentials
-ilo_default_username: "Administrator"
-ilo_default_password: "changeme"
+# Default / bootstrap credentials. Populate via environment variables or an
+# Ansible Vault to avoid committing secrets to source control.
+ilo_default_username: "{{ lookup('env', 'ILO_DEFAULT_USERNAME') | default('Administrator', true) }}"
+ilo_default_password: "{{ lookup('env', 'ILO_DEFAULT_PASSWORD') | default(omit, true) | mandatory('Set ILO_DEFAULT_PASSWORD (env or vault) before running') }}"
 
-ilo_admin_username: "automation"
-ilo_admin_password: "SuperSecretPassword123!"
+ilo_admin_username: "{{ lookup('env', 'ILO_ADMIN_USERNAME') | default('automation', true) }}"
+ilo_admin_password: "{{ lookup('env', 'ILO_ADMIN_PASSWORD') | default(omit, true) | mandatory('Set ILO_ADMIN_PASSWORD (env or vault) before running') }}"
 
 ilo_use_https: true
-ilo_validate_certs: false  # set true in prod with real CA
+ilo_validate_certs: "{{ lookup('env', 'ILO_VALIDATE_CERTS') | default('true', true) | bool }}"
 
 redfish_root: "/redfish/v1"
 redfish_system_path: "{{ redfish_root }}/Systems/1"
 redfish_chassis_path: "{{ redfish_root }}/Chassis/1"
 redfish_account_path: "{{ redfish_root }}/AccountService/Accounts"
 
+# Global defaults that can be overridden per-environment
+ilo_ntp_servers: []
+
 # Example OS deployment resources
 linux_kickstart_url: "http://repo.example.com/kickstart/hpe-standard.cfg"
 esxi_answer_file_url: "http://repo.example.com/esxi/ks.cfg"
 windows_unattend_url: "http://repo.example.com/win/unattend.xml"
+os_install_image_url: "{{ lookup('env', 'OS_INSTALL_IMAGE_URL') | default('', true) }}"
+os_install_reset_type: "{{ lookup('env', 'OS_INSTALL_RESET_TYPE') | default('GracefulRestart', true) }}"
 
 # NetBox integration
-netbox_url: "https://netbox.example.com"
-netbox_token: "NB_TOKEN_PLACEHOLDER"
-netbox_site: "dc1"
+netbox_url: "{{ lookup('env', 'NETBOX_URL') | default('https://netbox.example.com', true) }}"
+netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default(omit, true) | mandatory('Set NETBOX_TOKEN (env or vault) before running') }}"
+netbox_site: "{{ lookup('env', 'NETBOX_SITE') | default('dc1', true) }}"

@@ -1,6 +1,7 @@
 ---
+
 - name: "Login to iLO for compliance audit"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,36 +10,47 @@
       UserName: "{{ ilo_admin_username }}"
       Password: "{{ ilo_admin_password }}"
     body_format: json
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: ilo_session
   no_log: true
 
 - name: "Set token fact"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert audit session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token | default('') | length > 0
+    fail_msg: "Failed to obtain Redfish session token for compliance audit."
 
 - name: "Get system info for firmware"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}"
     method: GET
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: system_info
 
 - name: "Store audit facts"
-  set_fact:
+  ansible.builtin.set_fact:
     hpe_audit_firmware:
       bios_version: "{{ system_info.json.BiosVersion | default('unknown') }}"
       model: "{{ system_info.json.Model | default('unknown') }}"
       serial: "{{ system_info.json.SerialNumber | default('unknown') }}"
 
 - name: "Compare BIOS with expected baseline"
-  set_fact:
-    hpe_bios_compliant: "{{ hpe_audit_firmware.bios_version == firmware_expected.bios }}"
+  ansible.builtin.set_fact:
+    hpe_bios_compliant: "{{ ((hpe_audit_firmware.bios_version | default('')) == firmware_expected.bios) | bool }}"
 
 - name: "Show audit summary"
-  debug:
+  ansible.builtin.debug:
     msg:
       - "Host: {{ inventory_hostname }}"
       - "Model: {{ hpe_audit_firmware.model }}"
@@ -47,10 +59,11 @@
       - "Compliant: {{ hpe_bios_compliant }}"
 
 - name: "Logout iLO session"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | default('') | length > 0
   ignore_errors: true

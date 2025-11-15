@@ -1,0 +1,10 @@
+---
+- name: restart chrony
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+
+- name: restart rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    state: restarted

@@ -1,6 +1,7 @@
 ---
+
 - name: "Login to iLO for BIOS configuration"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,25 +10,37 @@
       UserName: "{{ ilo_admin_username }}"
       Password: "{{ ilo_admin_password }}"
     body_format: json
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: ilo_session
   no_log: true
 
 - name: "Set token for BIOS operations"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert BIOS session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token is defined
+      - ilo_x_auth_token | length > 0
+    fail_msg: "Failed to obtain Redfish session token for BIOS configuration."
 
 - name: "Load BIOS profile JSON"
-  slurp:
+  ansible.builtin.slurp:
     src: "{{ role_path }}/files/bios_profile.json"
   register: bios_profile_raw
 
 - name: "Decode BIOS profile"
-  set_fact:
+  ansible.builtin.set_fact:
     bios_profile: "{{ bios_profile_raw.content | b64decode | from_json }}"
 
 - name: "Apply BIOS settings"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}/Bios/Settings"
     method: PATCH
     headers:
@@ -35,12 +48,12 @@
       X-Auth-Token: "{{ ilo_x_auth_token }}"
     body_format: json
     body: "{{ bios_profile }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: bios_apply
   failed_when: bios_apply.status not in [200, 204]
 
 - name: "Request restart to apply BIOS settings"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}/Actions/ComputerSystem.Reset"
     method: POST
     headers:
@@ -49,14 +62,15 @@
     body_format: json
     body:
       ResetType: "ForceRestart"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   when: bios_apply.status in [200, 204]
 
 - name: "Logout iLO"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | default('') | length > 0
   ignore_errors: true

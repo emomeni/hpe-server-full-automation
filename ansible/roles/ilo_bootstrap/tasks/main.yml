@@ -1,6 +1,16 @@
 ---
+
+- name: "Validate iLO bootstrap credentials are provided"
+  ansible.builtin.assert:
+    that:
+      - ilo_default_username | length > 0
+      - ilo_default_password | length > 0
+      - ilo_admin_username | length > 0
+      - ilo_admin_password | length > 0
+    fail_msg: "Set ILO default/admin credentials via environment variables or vault secrets before running bootstrap."
+
 - name: "Bootstrap iLO: authenticate with default credentials"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,18 +19,30 @@
     body:
       UserName: "{{ ilo_default_username }}"
       Password: "{{ ilo_default_password }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
     return_content: true
   register: ilo_session
   failed_when: ilo_session.status not in [200, 201]
   no_log: true
 
 - name: "Extract iLO session token"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert bootstrap session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token is defined
+      - ilo_x_auth_token | length > 0
+    fail_msg: "Failed to obtain Redfish session token when bootstrapping iLO."
 
 - name: "Create automation admin account"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_account_path }}"
     method: POST
     headers:
@@ -32,13 +54,13 @@
       Password: "{{ ilo_admin_password }}"
       RoleId: "Administrator"
       Enabled: true
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: new_account
   failed_when: new_account.status not in [200, 201, 409]
   no_log: true
 
 - name: "Disable default iLO account"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_account_path }}/1"
     method: PATCH
     headers:
@@ -47,17 +69,17 @@
     body_format: json
     body:
       Enabled: false
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: disable_default
   failed_when: disable_default.status not in [200, 204]
   no_log: true
 
 - name: "Log out iLO session"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
-  when: ilo_session.location is defined
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | default('') | length > 0
   ignore_errors: true
