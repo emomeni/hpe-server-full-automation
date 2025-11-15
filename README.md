@@ -5,7 +5,7 @@ using Ansible, Redfish (iLO), and Python tooling.
 
 ## Topology
 ![Alt text](images/hpe-server-lifecycle-automation.png)
-The credit of this Lifecycle Automation image goes to ChatGPT
+The credit of this Lifecycle Automation image goes to ChatGPT.
 
 ## Features
 
