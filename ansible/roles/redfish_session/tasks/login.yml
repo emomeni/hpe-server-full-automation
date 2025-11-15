@@ -1,0 +1,55 @@
+---
+
+- name: "Validate Redfish login parameters"
+  ansible.builtin.assert:
+    that:
+      - redfish_host | default('') | length > 0
+      - redfish_username | default('') | length > 0
+      - redfish_password | default('') | length > 0
+    fail_msg: "redfish_session:login requires redfish_host, redfish_username, and redfish_password to be set."
+
+- name: "Create Redfish session"
+  ansible.builtin.uri:
+    url: "https://{{ redfish_host }}{{ redfish_root | default('/redfish/v1') }}/SessionService/Sessions"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      UserName: "{{ redfish_username }}"
+      Password: "{{ redfish_password }}"
+    validate_certs: "{{ redfish_validate_certs | default(true) | bool }}"
+    return_content: true
+  register: redfish_session_login_result
+  failed_when: redfish_session_login_result.status not in [200, 201]
+  no_log: "{{ redfish_login_no_log | default(true) }}"
+
+- name: "Derive Redfish session identifiers"
+  ansible.builtin.set_fact:
+    _redfish_session_token_internal: >-
+      {{ redfish_session_login_result.cookies.get('sessionKey')
+         | default(redfish_session_login_result.get('json', {}).get('Id'), true)
+         | default(redfish_session_login_result.get('headers', {}).get('X-Auth-Token'), true)
+         | default(redfish_session_login_result.get('headers', {}).get('x-auth-token'), true) }}
+    _redfish_session_location_internal: "{{ redfish_session_login_result.location | default(redfish_session_login_result.get('headers', {}).get('Location', redfish_session_login_result.get('headers', {}).get('location', ''))) }}"
+    _redfish_session_id_internal: "{{ redfish_session_login_result.get('json', {}).get('Id', '') }}"
+  no_log: true
+
+- name: "Ensure Redfish session token is available"
+  ansible.builtin.assert:
+    that:
+      - _redfish_session_token_internal | default('') | length > 0
+    fail_msg: "Failed to obtain Redfish session token."
+  no_log: true
+
+- name: "Expose Redfish session facts"
+  vars:
+    token_var: "{{ redfish_session_token_var | default('redfish_session_token') }}"
+    location_var: "{{ redfish_session_location_var | default('redfish_session_location') }}"
+    id_var: "{{ redfish_session_id_var | default('redfish_session_id') }}"
+  ansible.builtin.set_fact:
+    "{{ token_var }}": "{{ _redfish_session_token_internal }}"
+    "{{ location_var }}": "{{ _redfish_session_location_internal }}"
+    "{{ id_var }}": "{{ _redfish_session_id_internal }}"
+  no_log: true
+

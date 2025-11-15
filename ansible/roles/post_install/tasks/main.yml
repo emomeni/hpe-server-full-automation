@@ -40,22 +40,55 @@
     - ansible_system == 'Linux'
     - ansible_os_family in ['RedHat', 'Debian']
 
+- name: "Reset cached ops SSH public key"
+  ansible.builtin.set_fact:
+    post_install_ops_pubkey_effective: ""
+  no_log: true
+
+- name: "Set ops SSH public key from variable"
+  ansible.builtin.set_fact:
+    post_install_ops_pubkey_effective: "{{ post_install_ops_pubkey | default('', true) }}"
+  when: post_install_ops_pubkey | default('', true) | length > 0
+  no_log: true
+
+- name: "Load ops SSH public key from file"
+  ansible.builtin.set_fact:
+    post_install_ops_pubkey_effective: "{{ lookup('file', post_install_ops_pubkey_file) }}"
+  when:
+    - post_install_ops_pubkey_effective | default('', true) | length == 0
+    - post_install_ops_pubkey_file | default('', true) | length > 0
+  no_log: true
+
 - name: "Add authorized SSH key for ops"
   ansible.builtin.authorized_key:
     user: root
     state: present
-    key: "{{ lookup('file', role_path + '/files/ops_id_rsa.pub') }}"
-  when: ansible_system == 'Linux'
+    key: "{{ post_install_ops_pubkey_effective }}"
+  when:
+    - ansible_system == 'Linux'
+    - post_install_ops_pubkey_effective | default('', true) | length > 0
+  no_log: true
 
 - name: "Configure remote syslog target"
-  ansible.builtin.lineinfile:
-    path: /etc/rsyslog.conf
-    regexp: '^\*\.info'
-    line: "*.* @@log.example.com:514"
+  ansible.builtin.copy:
+    dest: "{{ post_install_syslog_conf_path }}"
+    content: "{{ (post_install_syslog_targets | default([]) | map('regex_replace', '^', '*.* @@') | join('\n')) ~ '\n' }}"
+    mode: '0644'
   notify: restart rsyslog
   when:
     - ansible_system == 'Linux'
     - ansible_os_family in ['RedHat', 'Debian']
+    - (post_install_syslog_targets | default([])) | length > 0
+
+- name: "Remove remote syslog configuration when no targets are defined"
+  ansible.builtin.file:
+    path: "{{ post_install_syslog_conf_path }}"
+    state: absent
+  notify: restart rsyslog
+  when:
+    - ansible_system == 'Linux'
+    - ansible_os_family in ['RedHat', 'Debian']
+    - (post_install_syslog_targets | default([])) | length == 0
 
 - name: "Install monitoring agent (placeholder)"
   ansible.builtin.debug:

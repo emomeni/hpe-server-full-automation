@@ -10,36 +10,18 @@
     fail_msg: "Set ILO default/admin credentials via environment variables or vault secrets before running bootstrap."
 
 - name: "Bootstrap iLO: authenticate with default credentials"
-  ansible.builtin.uri:
-    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
-    method: POST
-    headers:
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      UserName: "{{ ilo_default_username }}"
-      Password: "{{ ilo_default_password }}"
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-    return_content: true
-  register: ilo_session
-  failed_when: ilo_session.status not in [200, 201]
-  no_log: true
-
-- name: "Extract iLO session token"
-  ansible.builtin.set_fact:
-    ilo_x_auth_token: >-
-      {{ ilo_session.cookies.get('sessionKey')
-         | default(ilo_session.get('json', {}).get('Id'), true)
-         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
-         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
-    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
-
-- name: "Assert bootstrap session token was returned"
-  ansible.builtin.assert:
-    that:
-      - ilo_x_auth_token is defined
-      - ilo_x_auth_token | length > 0
-    fail_msg: "Failed to obtain Redfish session token when bootstrapping iLO."
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: login
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_username: "{{ ilo_default_username }}"
+    redfish_password: "{{ ilo_default_password }}"
+    redfish_root: "{{ redfish_root }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"
+    redfish_login_no_log: true
 
 - name: "Create automation admin account"
   ansible.builtin.uri:
@@ -59,9 +41,48 @@
   failed_when: new_account.status not in [200, 201, 409]
   no_log: true
 
+- name: "Reset discovered default account URI"
+  ansible.builtin.set_fact:
+    ilo_default_account_uri: ""
+  no_log: true
+
+- name: "Enumerate existing iLO accounts"
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}{{ redfish_account_path }}"
+    method: GET
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  register: ilo_accounts
+
+- name: "Gather account member details"
+  ansible.builtin.uri:
+    url: >-
+      https://{{ ansible_host }}{{ item['@odata.id'] | default('') | regex_replace('^https?://[^/]+', '') }}
+    method: GET
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  loop: "{{ ilo_accounts.json.Members | default([]) }}"
+  when: item.get('@odata.id') | default('') | length > 0
+  register: ilo_account_details
+
+- name: "Identify default iLO account URI"
+  ansible.builtin.set_fact:
+    ilo_default_account_uri: "{{ account_uri }}"
+  vars:
+    account_uri: >-
+      {{ item.json.get('@odata.id') | default(item.invocation.module_args.url | regex_replace('^https?://[^/]+', '')) }}
+  loop: "{{ ilo_account_details.results | default([]) }}"
+  when:
+    - item.json is defined
+    - item.json.get('UserName', '') | lower == ilo_default_username | lower
+    - (item.status | default(0)) in [200]
+
 - name: "Disable default iLO account"
   ansible.builtin.uri:
-    url: "https://{{ ansible_host }}{{ redfish_account_path }}/1"
+    url: >-
+      https://{{ ansible_host }}{{ ilo_default_account_uri | default('') | regex_replace('^https?://[^/]+', '') }}
     method: PATCH
     headers:
       Content-Type: "application/json"
@@ -73,13 +94,19 @@
   register: disable_default
   failed_when: disable_default.status not in [200, 204]
   no_log: true
+  when: ilo_default_account_uri | default('') | length > 0
+
+- name: "Warn if default iLO account was not located"
+  ansible.builtin.debug:
+    msg: "Default iLO account '{{ ilo_default_username }}' was not found; skipping disable step."
+  when: ilo_default_account_uri | default('') | length == 0
 
 - name: "Log out iLO session"
-  ansible.builtin.uri:
-    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
-    method: DELETE
-    headers:
-      X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-  when: ilo_session_location | default('') | length > 0
-  ignore_errors: true
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: logout
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"

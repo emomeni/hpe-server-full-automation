@@ -1,33 +1,26 @@
 ---
 
-- name: "Login to iLO for compliance audit"
-  ansible.builtin.uri:
-    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
-    method: POST
-    headers:
-      Content-Type: "application/json"
-    body:
-      UserName: "{{ ilo_admin_username }}"
-      Password: "{{ ilo_admin_password }}"
-    body_format: json
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-  register: ilo_session
-  no_log: true
-
-- name: "Set token fact"
-  ansible.builtin.set_fact:
-    ilo_x_auth_token: >-
-      {{ ilo_session.cookies.get('sessionKey')
-         | default(ilo_session.get('json', {}).get('Id'), true)
-         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
-         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
-    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
-
-- name: "Assert audit session token was returned"
+- name: "Validate firmware baseline is defined"
   ansible.builtin.assert:
     that:
-      - ilo_x_auth_token | default('') | length > 0
-    fail_msg: "Failed to obtain Redfish session token for compliance audit."
+      - firmware_expected is defined
+      - firmware_expected.bios is defined
+      - firmware_expected.bios | string | length > 0
+    fail_msg: "Define firmware_expected.bios (for example via host_vars/group_vars) before running the compliance_audit role."
+
+- name: "Login to iLO for compliance audit"
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: login
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_username: "{{ ilo_admin_username }}"
+    redfish_password: "{{ ilo_admin_password }}"
+    redfish_root: "{{ redfish_root }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"
+    redfish_login_no_log: true
 
 - name: "Get system info for firmware"
   ansible.builtin.uri:
@@ -59,11 +52,11 @@
       - "Compliant: {{ hpe_bios_compliant }}"
 
 - name: "Logout iLO session"
-  ansible.builtin.uri:
-    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
-    method: DELETE
-    headers:
-      X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-  when: ilo_session_location | default('') | length > 0
-  ignore_errors: true
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: logout
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"
