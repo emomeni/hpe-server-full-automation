@@ -1,6 +1,14 @@
 ---
+
+- name: "Validate iLO admin credentials are provided"
+  ansible.builtin.assert:
+    that:
+      - ilo_admin_username | length > 0
+      - ilo_admin_password | length > 0
+    fail_msg: "ilo_admin_username and ilo_admin_password must be provided via env or vault secrets."
+
 - name: "Login to iLO as automation admin"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,32 +17,42 @@
     body:
       UserName: "{{ ilo_admin_username }}"
       Password: "{{ ilo_admin_password }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: ilo_session
   failed_when: ilo_session.status not in [200, 201]
   no_log: true
 
 - name: "Set iLO token fact"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token is defined
+      - ilo_x_auth_token | length > 0
+    fail_msg: "iLO session login did not return an authentication token."
 
 - name: "Configure iLO DateTime and NTP"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/Managers/1/DateTime"
     method: PATCH
     headers:
       Content-Type: "application/json"
       X-Auth-Token: "{{ ilo_x_auth_token }}"
     body_format: json
-    body:
-      Timezone: "{{ ilo_timezone }}"
-      NTPServers: "{{ ilo_dns_servers }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    body: "{{ {'Timezone': ilo_timezone} | combine({'NTPServers': ilo_ntp_servers} if (ilo_ntp_servers | length) > 0 else {}) }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: datetime_cfg
   failed_when: datetime_cfg.status not in [200, 204]
 
 - name: "Enable HTTPS on default port (placeholder)"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/Managers/1/NetworkService"
     method: PATCH
     headers:
@@ -45,15 +63,16 @@
       HTTPS:
         Port: 443
         ProtocolEnabled: true
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: https_cfg
   failed_when: https_cfg.status not in [200, 204]
 
 - name: "Logout iLO session"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | length > 0
   ignore_errors: true

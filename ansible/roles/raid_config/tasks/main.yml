@@ -1,6 +1,7 @@
 ---
+
 - name: "Login to iLO for RAID discovery"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,34 +10,51 @@
     body:
       UserName: "{{ ilo_admin_username }}"
       Password: "{{ ilo_admin_password }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: ilo_session
   no_log: true
 
 - name: "Set token for RAID operations"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert RAID session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token | default('') | length > 0
+    fail_msg: "Failed to obtain Redfish session token for RAID discovery."
 
 - name: "Get storage controllers (extend for SmartArray)"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}/Storage"
     method: GET
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: storage
 
-- name: "Debug storage info"
-  debug:
+- name: "Summarize discovered storage controllers"
+  ansible.builtin.debug:
+    msg: "Discovered {{ storage.json.Members | default([]) | length }} storage controller(s) via Redfish."
+
+- name: "Show detailed storage payload when running verbosely"
+  ansible.builtin.debug:
     var: storage.json
+  when: ansible_verbosity | int > 1
 
 # Extend here: loop over Members, call OEM SmartArray actions to create LDs
 
 - name: "Logout iLO"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | default('') | length > 0
   ignore_errors: true

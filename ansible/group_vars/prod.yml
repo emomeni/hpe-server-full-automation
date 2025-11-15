@@ -3,6 +3,9 @@ ilo_timezone: "Europe/Berlin"
 ilo_dns_servers:
   - 10.0.0.10
   - 10.0.0.11
+ilo_ntp_servers:
+  - time1.example.com
+  - time2.example.com
 
 firmware_expected:
   bios: "U32 v3.00"

@@ -1,57 +1,66 @@
 ---
+
 - name: "Ensure common packages are installed"
-  package:
+  ansible.builtin.package:
     name:
       - vim
       - curl
       - wget
       - net-tools
     state: present
+  when:
+    - ansible_system == 'Linux'
+    - ansible_os_family in ['RedHat', 'Debian']
 
 - name: "Configure NTP via chrony"
-  copy:
+  ansible.builtin.copy:
     dest: /etc/chrony.conf
     content: |
+      {% set chrony_servers = post_install_ntp_servers | default(ilo_ntp_servers | default([])) %}
+      {% if chrony_servers | length == 0 %}
       server 0.pool.ntp.org iburst
       server 1.pool.ntp.org iburst
+      {% else %}
+      {% for server in chrony_servers %}
+      server {{ server }} iburst
+      {% endfor %}
+      {% endif %}
       driftfile /var/lib/chrony/drift
   notify: restart chrony
+  when:
+    - ansible_system == 'Linux'
+    - ansible_os_family in ['RedHat', 'Debian']
 
 - name: "Ensure chronyd is running"
-  service:
+  ansible.builtin.service:
     name: chronyd
     state: started
     enabled: true
+  when:
+    - ansible_system == 'Linux'
+    - ansible_os_family in ['RedHat', 'Debian']
 
 - name: "Add authorized SSH key for ops"
-  authorized_key:
+  ansible.builtin.authorized_key:
     user: root
     state: present
     key: "{{ lookup('file', role_path + '/files/ops_id_rsa.pub') }}"
-  ignore_errors: true
+  when: ansible_system == 'Linux'
 
 - name: "Configure remote syslog target"
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/rsyslog.conf
     regexp: '^\*\.info'
     line: "*.* @@log.example.com:514"
   notify: restart rsyslog
+  when:
+    - ansible_system == 'Linux'
+    - ansible_os_family in ['RedHat', 'Debian']
 
 - name: "Install monitoring agent (placeholder)"
-  debug:
+  ansible.builtin.debug:
     msg: "Install your monitoring agent here (Zabbix, Prometheus node_exporter, etc.)"
 
 - name: "Install backup agent (placeholder)"
-  debug:
+  ansible.builtin.debug:
     msg: "Install your backup agent here (Veeam, etc.)"
-
-handlers:
-  - name: restart chrony
-    service:
-      name: chronyd
-      state: restarted
-
-  - name: restart rsyslog
-    service:
-      name: rsyslog
-      state: restarted

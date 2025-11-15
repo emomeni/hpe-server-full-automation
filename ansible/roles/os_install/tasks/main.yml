@@ -1,6 +1,15 @@
 ---
+
+- name: "Validate OS installation inputs"
+  ansible.builtin.assert:
+    that:
+      - ilo_admin_username | length > 0
+      - ilo_admin_password | length > 0
+      - os_install_image_url | length > 0
+    fail_msg: "Provide ilo_admin credentials and set os_install_image_url (via env or vars) before running the OS install role."
+
 - name: "Login to iLO for OS install"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
     method: POST
     headers:
@@ -9,16 +18,27 @@
     body:
       UserName: "{{ ilo_admin_username }}"
       Password: "{{ ilo_admin_password }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: ilo_session
   no_log: true
 
 - name: "Set token for OS install operations"
-  set_fact:
-    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+  ansible.builtin.set_fact:
+    ilo_x_auth_token: >-
+      {{ ilo_session.cookies.get('sessionKey')
+         | default(ilo_session.get('json', {}).get('Id'), true)
+         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
+         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
+    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
+
+- name: "Assert OS install session token was returned"
+  ansible.builtin.assert:
+    that:
+      - ilo_x_auth_token | default('') | length > 0
+    fail_msg: "Failed to obtain Redfish session token for OS installation operations."
 
 - name: "Attach Linux installer ISO as virtual media"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_root }}/Managers/1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
     method: POST
     headers:
@@ -26,15 +46,15 @@
       X-Auth-Token: "{{ ilo_x_auth_token }}"
     body_format: json
     body:
-      Image: "http://repo.example.com/iso/RHEL9-hpe-auto.iso"
+      Image: "{{ os_install_image_url }}"
       Inserted: true
       WriteProtected: true
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: vm_attach
   failed_when: vm_attach.status not in [200, 204]
 
 - name: "Override boot order to CD once"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}"
     method: PATCH
     headers:
@@ -45,12 +65,12 @@
       Boot:
         BootSourceOverrideEnabled: "Once"
         BootSourceOverrideTarget: "Cd"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: boot_cfg
   failed_when: boot_cfg.status not in [200, 204]
 
 - name: "Restart server to start OS installation"
-  uri:
+  ansible.builtin.uri:
     url: "https://{{ ansible_host }}{{ redfish_system_path }}/Actions/ComputerSystem.Reset"
     method: POST
     headers:
@@ -58,16 +78,17 @@
       X-Auth-Token: "{{ ilo_x_auth_token }}"
     body_format: json
     body:
-      ResetType: "ForceRestart"
-    validate_certs: "{{ ilo_validate_certs }}"
+      ResetType: "{{ os_install_reset_type }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
   register: reset
   failed_when: reset.status not in [200, 202, 204]
 
 - name: "Logout iLO"
-  uri:
-    url: "{{ ilo_session.location | default(omit) }}"
+  ansible.builtin.uri:
+    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
     method: DELETE
     headers:
       X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs }}"
+    validate_certs: "{{ ilo_validate_certs | bool }}"
+  when: ilo_session_location | default('') | length > 0
   ignore_errors: true
