@@ -1,0 +1,5 @@
+bios_profile:
+  Hyperthreading: Enabled
+  VirtualizationTechnology: Enabled
+  PowerProfile: Balanced
+  BootMode: UEFI

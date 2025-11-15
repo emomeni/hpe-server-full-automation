@@ -1,0 +1,5 @@
+firmware_expected:
+  bios: "U32 v2.10"
+  ilo: "2.85"
+  storage: "5.04"
+  nic: "20.6.150.0"

@@ -1,0 +1,7 @@
+---
+- name: "Post-install configuration on OS"
+  hosts: lab:prod
+  become: true
+  gather_facts: true
+  roles:
+    - post_install

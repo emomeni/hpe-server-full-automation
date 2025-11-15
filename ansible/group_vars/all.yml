@@ -1,0 +1,24 @@
+# Default / bootstrap credentials
+ilo_default_username: "Administrator"
+ilo_default_password: "changeme"
+
+ilo_admin_username: "automation"
+ilo_admin_password: "SuperSecretPassword123!"
+
+ilo_use_https: true
+ilo_validate_certs: false  # set true in prod with real CA
+
+redfish_root: "/redfish/v1"
+redfish_system_path: "{{ redfish_root }}/Systems/1"
+redfish_chassis_path: "{{ redfish_root }}/Chassis/1"
+redfish_account_path: "{{ redfish_root }}/AccountService/Accounts"
+
+# Example OS deployment resources
+linux_kickstart_url: "http://repo.example.com/kickstart/hpe-standard.cfg"
+esxi_answer_file_url: "http://repo.example.com/esxi/ks.cfg"
+windows_unattend_url: "http://repo.example.com/win/unattend.xml"
+
+# NetBox integration
+netbox_url: "https://netbox.example.com"
+netbox_token: "NB_TOKEN_PLACEHOLDER"
+netbox_site: "dc1"

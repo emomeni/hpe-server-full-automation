@@ -1,0 +1,56 @@
+---
+- name: "Login to iLO for compliance audit"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    body:
+      UserName: "{{ ilo_admin_username }}"
+      Password: "{{ ilo_admin_password }}"
+    body_format: json
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: ilo_session
+  no_log: true
+
+- name: "Set token fact"
+  set_fact:
+    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+
+- name: "Get system info for firmware"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_system_path }}"
+    method: GET
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: system_info
+
+- name: "Store audit facts"
+  set_fact:
+    hpe_audit_firmware:
+      bios_version: "{{ system_info.json.BiosVersion | default('unknown') }}"
+      model: "{{ system_info.json.Model | default('unknown') }}"
+      serial: "{{ system_info.json.SerialNumber | default('unknown') }}"
+
+- name: "Compare BIOS with expected baseline"
+  set_fact:
+    hpe_bios_compliant: "{{ hpe_audit_firmware.bios_version == firmware_expected.bios }}"
+
+- name: "Show audit summary"
+  debug:
+    msg:
+      - "Host: {{ inventory_hostname }}"
+      - "Model: {{ hpe_audit_firmware.model }}"
+      - "Serial: {{ hpe_audit_firmware.serial }}"
+      - "BIOS current: {{ hpe_audit_firmware.bios_version }} | expected: {{ firmware_expected.bios }}"
+      - "Compliant: {{ hpe_bios_compliant }}"
+
+- name: "Logout iLO session"
+  uri:
+    url: "{{ ilo_session.location | default(omit) }}"
+    method: DELETE
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  ignore_errors: true

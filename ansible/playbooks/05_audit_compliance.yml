@@ -1,0 +1,6 @@
+---
+- name: "Audit firmware / BIOS compliance on HPE servers"
+  hosts: ilo
+  gather_facts: false
+  roles:
+    - compliance_audit

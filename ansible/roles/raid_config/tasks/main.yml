@@ -1,0 +1,42 @@
+---
+- name: "Login to iLO for RAID discovery"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      UserName: "{{ ilo_admin_username }}"
+      Password: "{{ ilo_admin_password }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: ilo_session
+  no_log: true
+
+- name: "Set token for RAID operations"
+  set_fact:
+    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+
+- name: "Get storage controllers (extend for SmartArray)"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_system_path }}/Storage"
+    method: GET
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: storage
+
+- name: "Debug storage info"
+  debug:
+    var: storage.json
+
+# Extend here: loop over Members, call OEM SmartArray actions to create LDs
+
+- name: "Logout iLO"
+  uri:
+    url: "{{ ilo_session.location | default(omit) }}"
+    method: DELETE
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  ignore_errors: true

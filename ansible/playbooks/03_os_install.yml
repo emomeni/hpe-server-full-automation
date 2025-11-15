@@ -1,0 +1,6 @@
+---
+- name: "Trigger OS installation workflow"
+  hosts: ilo
+  gather_facts: false
+  roles:
+    - os_install

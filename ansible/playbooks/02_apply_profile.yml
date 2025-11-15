@@ -1,0 +1,8 @@
+---
+- name: "Apply iLO, BIOS and RAID profiles"
+  hosts: ilo
+  gather_facts: false
+  roles:
+    - ilo_config
+    - bios_profile
+    - raid_config

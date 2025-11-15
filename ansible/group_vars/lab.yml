@@ -1,0 +1,10 @@
+env_name: "lab"
+ilo_timezone: "UTC"
+ilo_dns_servers:
+  - 192.168.0.10
+  - 192.168.0.11
+
+firmware_expected:
+  bios: "U32 v2.10"
+  ilo: "2.85"
+  storage: "5.04"

@@ -1,0 +1,38 @@
+stages:
+  - lint
+  - test
+  - audit
+
+variables:
+  ANSIBLE_FORCE_COLOR: "1"
+  ANSIBLE_STDOUT_CALLBACK: "yaml"
+
+image: python:3.11
+
+before_script:
+  - pip install ansible ansible-lint yamllint requests
+  - ansible-galaxy collection install community.general
+  - cd ansible
+
+lint:
+  stage: lint
+  script:
+    - yamllint .
+    - ansible-lint playbooks/*.yml
+  only:
+    - merge_requests
+    - main
+
+test_audit_lab:
+  stage: test
+  script:
+    - ansible-playbook playbooks/05_audit_compliance.yml -i inventory/hosts.yml --limit lab --check
+  only:
+    - merge_requests
+
+scheduled_audit_prod:
+  stage: audit
+  script:
+    - ansible-playbook playbooks/05_audit_compliance.yml -i inventory/hosts.yml --limit prod
+  only:
+    - schedules

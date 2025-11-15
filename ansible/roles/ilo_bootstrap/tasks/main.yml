@@ -1,0 +1,63 @@
+---
+- name: "Bootstrap iLO: authenticate with default credentials"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      UserName: "{{ ilo_default_username }}"
+      Password: "{{ ilo_default_password }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+    return_content: true
+  register: ilo_session
+  failed_when: ilo_session.status not in [200, 201]
+  no_log: true
+
+- name: "Extract iLO session token"
+  set_fact:
+    ilo_x_auth_token: "{{ ilo_session.cookies['sessionKey'] | default(ilo_session.json['Id']) }}"
+
+- name: "Create automation admin account"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_account_path }}"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    body_format: json
+    body:
+      UserName: "{{ ilo_admin_username }}"
+      Password: "{{ ilo_admin_password }}"
+      RoleId: "Administrator"
+      Enabled: true
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: new_account
+  failed_when: new_account.status not in [200, 201, 409]
+  no_log: true
+
+- name: "Disable default iLO account"
+  uri:
+    url: "https://{{ ansible_host }}{{ redfish_account_path }}/1"
+    method: PATCH
+    headers:
+      Content-Type: "application/json"
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    body_format: json
+    body:
+      Enabled: false
+    validate_certs: "{{ ilo_validate_certs }}"
+  register: disable_default
+  failed_when: disable_default.status not in [200, 204]
+  no_log: true
+
+- name: "Log out iLO session"
+  uri:
+    url: "{{ ilo_session.location | default(omit) }}"
+    method: DELETE
+    headers:
+      X-Auth-Token: "{{ ilo_x_auth_token }}"
+    validate_certs: "{{ ilo_validate_certs }}"
+  when: ilo_session.location is defined
+  ignore_errors: true

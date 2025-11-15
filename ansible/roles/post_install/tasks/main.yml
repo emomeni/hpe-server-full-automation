@@ -1,0 +1,57 @@
+---
+- name: "Ensure common packages are installed"
+  package:
+    name:
+      - vim
+      - curl
+      - wget
+      - net-tools
+    state: present
+
+- name: "Configure NTP via chrony"
+  copy:
+    dest: /etc/chrony.conf
+    content: |
+      server 0.pool.ntp.org iburst
+      server 1.pool.ntp.org iburst
+      driftfile /var/lib/chrony/drift
+  notify: restart chrony
+
+- name: "Ensure chronyd is running"
+  service:
+    name: chronyd
+    state: started
+    enabled: true
+
+- name: "Add authorized SSH key for ops"
+  authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', role_path + '/files/ops_id_rsa.pub') }}"
+  ignore_errors: true
+
+- name: "Configure remote syslog target"
+  lineinfile:
+    path: /etc/rsyslog.conf
+    regexp: '^\*\.info'
+    line: "*.* @@log.example.com:514"
+  notify: restart rsyslog
+
+- name: "Install monitoring agent (placeholder)"
+  debug:
+    msg: "Install your monitoring agent here (Zabbix, Prometheus node_exporter, etc.)"
+
+- name: "Install backup agent (placeholder)"
+  debug:
+    msg: "Install your backup agent here (Veeam, etc.)"
+
+handlers:
+  - name: restart chrony
+    service:
+      name: chronyd
+      state: restarted
+
+  - name: restart rsyslog
+    service:
+      name: rsyslog
+      state: restarted

@@ -1,0 +1,6 @@
+---
+- name: "Bootstrap iLO accounts and security"
+  hosts: ilo
+  gather_facts: false
+  roles:
+    - ilo_bootstrap
