@@ -1,0 +1,7 @@
+---
+
+post_install_ops_pubkey: ""
+post_install_ops_pubkey_file: ""
+post_install_syslog_targets: []
+post_install_syslog_conf_path: "/etc/rsyslog.d/99-remote-forwarding.conf"
+

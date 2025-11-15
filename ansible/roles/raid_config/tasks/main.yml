@@ -1,33 +1,18 @@
 ---
 
 - name: "Login to iLO for RAID discovery"
-  ansible.builtin.uri:
-    url: "https://{{ ansible_host }}{{ redfish_root }}/SessionService/Sessions"
-    method: POST
-    headers:
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      UserName: "{{ ilo_admin_username }}"
-      Password: "{{ ilo_admin_password }}"
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-  register: ilo_session
-  no_log: true
-
-- name: "Set token for RAID operations"
-  ansible.builtin.set_fact:
-    ilo_x_auth_token: >-
-      {{ ilo_session.cookies.get('sessionKey')
-         | default(ilo_session.get('json', {}).get('Id'), true)
-         | default(ilo_session.get('headers', {}).get('X-Auth-Token'), true)
-         | default(ilo_session.get('headers', {}).get('x-auth-token'), true) }}
-    ilo_session_location: "{{ ilo_session.location | default(ilo_session.get('headers', {}).get('Location', ilo_session.get('headers', {}).get('location', ''))) }}"
-
-- name: "Assert RAID session token was returned"
-  ansible.builtin.assert:
-    that:
-      - ilo_x_auth_token | default('') | length > 0
-    fail_msg: "Failed to obtain Redfish session token for RAID discovery."
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: login
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_username: "{{ ilo_admin_username }}"
+    redfish_password: "{{ ilo_admin_password }}"
+    redfish_root: "{{ redfish_root }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"
+    redfish_login_no_log: true
 
 - name: "Get storage controllers (extend for SmartArray)"
   ansible.builtin.uri:
@@ -50,11 +35,11 @@
 # Extend here: loop over Members, call OEM SmartArray actions to create LDs
 
 - name: "Logout iLO"
-  ansible.builtin.uri:
-    url: "{{ ilo_session_location if ilo_session_location is match('^https?://') else 'https://' + ansible_host + ilo_session_location }}"
-    method: DELETE
-    headers:
-      X-Auth-Token: "{{ ilo_x_auth_token }}"
-    validate_certs: "{{ ilo_validate_certs | bool }}"
-  when: ilo_session_location | default('') | length > 0
-  ignore_errors: true
+  ansible.builtin.include_role:
+    name: redfish_session
+    tasks_from: logout
+  vars:
+    redfish_host: "{{ ansible_host }}"
+    redfish_validate_certs: "{{ ilo_validate_certs | bool }}"
+    redfish_session_token_var: "ilo_x_auth_token"
+    redfish_session_location_var: "ilo_session_location"

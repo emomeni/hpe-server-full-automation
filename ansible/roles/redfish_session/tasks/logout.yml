@@ -1,0 +1,27 @@
+---
+
+- name: "Prepare Redfish session logout values"
+  vars:
+    token_var: "{{ redfish_session_token_var | default('redfish_session_token') }}"
+    location_var: "{{ redfish_session_location_var | default('redfish_session_location') }}"
+  ansible.builtin.set_fact:
+    _redfish_logout_token: "{{ lookup('vars', token_var) | default('', true) }}"
+    _redfish_logout_location: "{{ lookup('vars', location_var) | default('', true) }}"
+  cacheable: false
+  no_log: true
+
+- name: "Close Redfish session"
+  ansible.builtin.uri:
+    url: >-
+      {{ _redfish_logout_location if _redfish_logout_location is match('^https?://')
+         else 'https://' + redfish_host + _redfish_logout_location }}
+    method: DELETE
+    headers:
+      X-Auth-Token: "{{ _redfish_logout_token }}"
+    validate_certs: "{{ redfish_validate_certs | default(true) | bool }}"
+  when:
+    - _redfish_logout_token | default('') | length > 0
+    - _redfish_logout_location | default('') | length > 0
+  ignore_errors: "{{ redfish_logout_ignore_errors | default(true) }}"
+  no_log: "{{ redfish_logout_no_log | default(true) }}"
+

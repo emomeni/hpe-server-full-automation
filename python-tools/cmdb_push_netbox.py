@@ -4,7 +4,7 @@
 import json
 import os
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 from requests import Session
@@ -64,7 +64,7 @@ def resolve_site_id(session: Session) -> int:
     raise RuntimeError(f"Unable to resolve NetBox site '{NETBOX_SITE}'.")
 
 
-def resolve_device_type_id(session: Session, model: str) -> int:
+def resolve_device_type_id(session: Session, model: str) -> Optional[int]:
     url = f"{NETBOX_URL}/api/dcim/device-types/"
     response = session.get(
         url,
@@ -76,10 +76,10 @@ def resolve_device_type_id(session: Session, model: str) -> int:
     results = response.json().get("results", [])
     if results:
         return results[0]["id"]
-    raise RuntimeError(f"Unable to resolve NetBox device type for model '{model}'.")
+    return None
 
 
-def create_or_update_device(session: Session, site_id: int, dev: Dict[str, Any]) -> Dict[str, Any]:
+def create_or_update_device(session: Session, site_id: int, dev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not dev.get("serial"):
         raise RuntimeError(f"Device {dev.get('host')} is missing a serial number; skipping sync.")
 
@@ -88,6 +88,12 @@ def create_or_update_device(session: Session, site_id: int, dev: Dict[str, Any])
         raise RuntimeError(f"Device {dev.get('host', dev.get('serial'))} is missing a model identifier; skipping sync.")
 
     device_type_id = resolve_device_type_id(session, model)
+    if device_type_id is None:
+        print(
+            f"[WARN] Skipping {dev.get('host', dev.get('serial'))}: NetBox device type for model '{model}' was not found.",
+            file=sys.stderr,
+        )
+        return None
     url = f"{NETBOX_URL}/api/dcim/devices/"
     response = session.get(
         url,
@@ -145,6 +151,8 @@ def main() -> None:
                     response = create_or_update_device(session, site_id, dev)
                 except RuntimeError as exc:
                     print(f"[WARN] Skipping {dev.get('host', dev.get('serial'))}: {exc}")
+                    continue
+                if not response:
                     continue
                 print(f"[OK] Synced {dev['host']} -> NetBox ID {response.get('id')}")
     except (RequestException, RuntimeError) as exc:
